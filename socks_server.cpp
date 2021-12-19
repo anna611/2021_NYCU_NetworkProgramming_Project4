@@ -34,10 +34,13 @@ public:
   tcp::socket socket_;
   enum { max_length = 1024 };
   unsigned char message[max_length] = {0};
+  char clientdata[200] ;
+  char hostdata[200] ;
   session(tcp::socket socket)
     : socket_(std::move(socket)),resolv(io_context)
   {
-
+    memset(clientdata,0,200);
+    memset(hostdata,0,200);
   }
 
   void start()
@@ -74,7 +77,6 @@ private:
             showMessage(CD,ip,port,check);
             if(check == true){
                 connectOperation(ip,port);
-                acceptMessage(message);
             }
             else{
                 rejectMessage(message);
@@ -87,28 +89,124 @@ private:
           }
         });
   }
+  void writeHost(std::size_t length){
+      auto self(shared_from_this());
+      (*connectsocket).async_send(boost::asio::buffer(clientdata, length),
+      [this,self](boost::system::error_code ec, std::size_t len){
+          if(!ec){
+              memset(clientdata,0,200);
+              readClient();
+          }
+          else{
+            cerr << "send error:"<< ec.message() << endl;
+          }
+      });
+  }
+  void writeClient(std::size_t length){
+      auto self(shared_from_this());
+      socket_.async_send(boost::asio::buffer(hostdata, length),
+      [this,self](boost::system::error_code ec, std::size_t len){
+          if(!ec){
+              memset(hostdata,0,200);
+              readHost();
+          }
+          else{
+            cerr << "send error:"<< ec.message() << endl;
+          }
+      });
+  }
+  void readClient(){
+      auto self(shared_from_this());
+      socket_.async_read_some(boost::asio::buffer(clientdata, 200),
+        [this, self](boost::system::error_code ec, std::size_t length)
+        {
+            if(!ec){
+                //cerr << "clientdata"<<clientdata <<endl;
+                writeHost(length);
+            }
+            else if(ec == boost::asio::error::eof){
+                (*connectsocket).async_send(boost::asio::buffer(clientdata, length),
+                [this,self](boost::system::error_code ec, std::size_t len){
+                    if(!ec){
+
+                    }
+                    else{
+                        cerr << "send error:"<< ec.message() << endl;
+                    }
+                });
+            }
+            else{
+                cerr << "read client data error:" << ec.message() << endl;
+            }
+        });
+  }
+  void readHost(){
+      auto self(shared_from_this());
+      (*connectsocket).async_read_some(boost::asio::buffer(hostdata, 200),
+        [this, self](boost::system::error_code ec, std::size_t length)
+        {
+            if(!ec){
+                //cerr << "hostdata"<<hostdata <<endl;
+                writeClient(length);
+            }
+            else if(ec == boost::asio::error::eof){
+                socket_.async_send(boost::asio::buffer(hostdata, length),
+                [this,self](boost::system::error_code ec, std::size_t len){
+                    if(!ec){
+
+                    }
+                    else{
+                        cerr << "send error:"<< ec.message() << endl;
+                    }
+                });
+            }
+            else{
+                cerr << "read host data error"<< ec.message() << endl;
+            }
+        });
+  }
   void connect_handler(const boost::system::error_code &ec)
   {
+      auto self(shared_from_this());
       if (!ec)
       {
+          //cerr << "connect handler" <<endl;
           //reply to socks client
-          return;
+          unsigned char reply[8] = {0};
+          reply[0] = 0;
+          reply[1] = 90;
+          for(int i = 2; i < 8;i++){
+            reply[i] = 0;
+          }
+          socket_.async_send(boost::asio::buffer(reply, 8),
+          [this,self](boost::system::error_code ec, std::size_t len){
+          if(!ec){
+              //cerr << "connect call back" <<endl;
+              readClient();
+              readHost();
+          }
+          else
+              cout<<"send error!"<<endl;
+          });
       }
   }
   void resolve_handler(const boost::system::error_code &ec,
-        tcp::resolver::iterator it)
-  {
+        tcp::resolver::iterator it){
+      auto self(shared_from_this());
+      //cerr << "resole handler" <<endl;
       if (!ec){
-          //cerr <<"resolve_handeler"<<endl;
+          //cerr <<"before connect"<<endl;
           connectsocket = new tcp::socket(io_context);
-          (*connectsocket).async_connect(*it,  boost::bind( &session::connect_handler, this,std::placeholders::_1));
+          (*connectsocket).async_connect(*it,  boost::bind( &session::connect_handler, self,std::placeholders::_1));
+          //cerr <<"after connect"<<endl;
       }
       else{
-          cerr << "error:" <<ec <<endl;
+          cerr << "error:" <<ec.message() <<endl;
       }
   }
   void connectOperation(int ip[],int port){
-      
+      auto self(shared_from_this());
+      //cerr << "connectOperation" <<endl;
       string host = "";
       for(int i = 0;i < 4;++i){
           host += to_string(ip[i]);
@@ -118,8 +216,7 @@ private:
       //cerr << "host:" << host << endl;
       //cerr << "port:" << port << endl;
       tcp::resolver::query q{host, to_string(port)};
-      resolv.async_resolve(q, boost::bind( &session::resolve_handler, this,std::placeholders::_1,std::placeholders::_2));
-      return;
+      resolv.async_resolve(q, boost::bind( &session::resolve_handler, self,std::placeholders::_1,std::placeholders::_2));
   }
   
   bool checkfirewall(unsigned char CD,int ip[]){
@@ -192,32 +289,14 @@ private:
       for(int i = 2; i < 8;i++){
         reply[i] = msg[i];
       }
-      socket_.async_send(boost::asio::buffer(reply, 8),[self](boost::system::error_code ec, std::size_t len){
+      socket_.async_send(boost::asio::buffer(reply, 8),
+      [self](boost::system::error_code ec, std::size_t len){
           if(!ec){
 
           }
           else
               cout<<"send error!"<<endl;
       });
-      return;
-  }
-  void acceptMessage(unsigned char *msg){
-      auto self(shared_from_this());
-      unsigned char reply[8] = {0};
-      reply[0] = 0;
-      reply[1] = 90;
-      for(int i = 2; i < 8;i++){
-        reply[i] = 0;
-      }
-      //cerr << "before send reply" <<endl;
-      socket_.async_send(boost::asio::buffer(reply, 8),[self](boost::system::error_code ec, std::size_t len){
-          if(!ec){
-
-          }
-          else
-              cout<<"send error!"<<endl;
-      });
-      //cerr << "after send reply" <<endl;
       return;
   }
   /*void do_write(std::size_t length)
