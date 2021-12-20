@@ -26,6 +26,8 @@ typedef struct{
 }client_info;
 
 client_info client_record[5];
+string socksHostname = "";
+string socksPort = "";
 
 class session
     :public std::enable_shared_from_this<session>
@@ -60,35 +62,37 @@ class session
             str.swap(buffer);
         }
 
-        void output_shell(int index ,string content){
+        void output_shell(string content){
             encode(content);
             string output = "<script>document.getElementById('s"+to_string(index)+"').innerHTML += '"+content+"';</script>";
             cout << output << flush;
         }
-        void output_cmd(int index,string content){
+        void output_cmd(string content){
             encode(content);
             string output = "<script>document.getElementById('s"+to_string(index)+"').innerHTML += '<b>"+content+"</b>';</script>";
             cout <<output <<flush;
         }
 
-        bool do_write(int index){
+        bool do_write(){
             auto self(shared_from_this());
             string input;
             bool state = false;
             getline(file_,input);
-            //cerr << "input:" <<input <<endl;
-            if(input == "exit"){
+            if(boost::algorithm::contains(input,"exit")){
+                //cerr << index << endl;
                 state = true;
             }
             input = input + "\n";
             //cerr << "before write" <<endl;
             boost::asio::async_write(tcp_socket, boost::asio::buffer(input.c_str(), input.size()),
                 [this, self](boost::system::error_code ec, std::size_t ){
-
+                    if(ec){
+                        cerr << ec << endl;
+                    }
                 });
             //cerr << "after write" <<endl;
             if(checkexit == false)
-                output_cmd(index,input);
+                output_cmd(input);
 
             return state;
         }
@@ -103,15 +107,24 @@ class session
                 if (!ec)
                 {
                     string str(data_);
-                   // cerr <<"command:" << str << endl;
-                    output_shell(index,str);
+                    output_shell(str);
                     //std::cout.write(bytes.data(), bytes_transferred);
                     if(boost::algorithm::contains(data_,"%")){
-                        checkexit = do_write(index);
-                        if(checkexit == true){
-                            client_record[index].valid = 0;
-                        }
+                        checkexit = do_write();
                     }
+                    if(checkexit == true){                        
+                        client_record[index].valid = 0;
+                        file_.close();
+                        tcp_socket.close();
+                        if((client_record[0].valid == 0)&&(client_record[1].valid == 0)&&(client_record[2].valid == 0)
+                            &&(client_record[3].valid == 0)&&(client_record[4].valid == 0)){
+                                ioservice.stop();
+                            }
+                        return;
+                    }
+                }
+                else if (ec == boost::asio::error::eof) {
+                    return;
                 }
                 else{
                     return;
@@ -145,23 +158,35 @@ void ParseQuery(string query){
         stringstream tempss(spiltQuery[i]);
         while (getline(tempss, tok, '=')) {
         }
-        if(i % 3 == 0){
-            if(tok != "")
-                client_record[index].host = tok;
-            //cerr <<"host:" <<tok << endl;
+        if(index < 5){
+            if(i % 3 == 0){
+                if(tok != "")
+                    client_record[index].host = tok;
+                //cerr <<"host:" <<tok << endl;
+            }
+            else if(i % 3 == 1){
+                if(tok != "")
+                    client_record[index].port = tok;
+                //cerr <<"port:" <<tok << endl;
+            }
+            else if(i % 3 == 2){
+                if(tok != "")
+                    client_record[index].file = tok;
+                //cerr <<"file:" <<tok << endl;
+            }
+            if(client_record[index].host != "")
+                client_record[index].valid = 1;
         }
-        else if(i % 3 == 1){
-            if(tok != "")
-                client_record[index].port = tok;
-            //cerr <<"port:" <<tok << endl;
+        else if(index == 5){
+            if(i % 3 == 0){
+                if(tok != "")
+                    socksHostname = tok;
+            }
+            else if(i % 3 == 1){
+                if(tok != "")
+                    socksPort = tok;
+            }
         }
-        else if(i % 3 == 2){
-            if(tok != "")
-                client_record[index].file = tok;
-            //cerr <<"file:" <<tok << endl;
-        }
-        if(client_record[index].host != "")
-            client_record[index].valid = 1;
     }
     return;
 }
@@ -173,7 +198,7 @@ void Printpanel(){
 "<html lang=\"en\">"
 "  <head>"
 "    <meta charset=\"UTF-8\" />"
-"    <title>NP Project 3 Console</title>"
+"    <title>NP Project 4 Console</title>"
 "    <link"
 "     rel=\"stylesheet\""
 "     href=\"https://cdn.jsdelivr.net/npm/bootstrap@4.5.3/dist/css/bootstrap.min.css\""
@@ -236,26 +261,76 @@ void Printpanel(){
 class server{
     private:
     tcp::resolver resolv;
+    tcp::resolver socksresolv;
     ip::tcp::socket *tcp_socket[5];
+    unsigned char message[8];
+    
     public:
         server()
-            :resolv(ioservice){
+            :resolv(ioservice), socksresolv(ioservice){
                 //cerr << "before query" <<endl;
                 for(int i = 0;i < 5;++i){
                     if(client_record[i].valid == 1){
-                        tcp::resolver::query q{client_record[i].host, client_record[i].port};
-                        resolv.async_resolve(q, boost::bind( &server::resolve_handler, this,i,std::placeholders::_1,std::placeholders::_2));
+                        tcp::resolver::query q{socksHostname,socksPort};
+                        socksresolv.async_resolve(q,boost::bind( &server::resolve_handler, this,i,std::placeholders::_1,std::placeholders::_2));
+                        
                     }
                 }
+                
                 //cerr << "after query" <<endl;
             }    
     private:
-        void connect_handler(int index,const boost::system::error_code &ec)
+        void connect_handler(int index, tcp::endpoint endpoint, const boost::system::error_code &ec, tcp::resolver::iterator it)
         {
             if (!ec)
             {
                 //cerr <<"connect_handelert "<<endl;
-                make_shared<session>(move((*tcp_socket[index])), index)->start();
+                string deli = ".";
+                size_t pos = 0;
+                string token; 
+                string temp_ip = endpoint.address().to_string();
+                message[0] = 0x04;
+                message[1] = 0x01;
+                message[2] = endpoint.port()/256;
+                message[3] = endpoint.port()%256;
+                for(int i= 0;i < 4; ++i){
+                    if((pos =temp_ip.find(deli)) != std::string::npos){
+                        token = temp_ip.substr(0, pos);
+                        message[i+4] = (unsigned char)atoi(token.c_str());
+                        temp_ip.erase(0, pos + deli.length());
+                    }
+                    if(i == 3){
+                        message[i+4] = (unsigned char)atoi(temp_ip.c_str());
+                    }
+                }
+                (*tcp_socket[index]).async_send(boost::asio::buffer(message, 8),
+                [this, index](boost::system::error_code ec, size_t len) {
+                    if(!ec) {
+                        (*tcp_socket[index]).async_read_some(boost::asio::buffer(message, 8), [this, index](boost::system::error_code err, size_t len) {
+                            if(!err) {
+                                make_shared<session>(move((*tcp_socket[index])), index)->start();
+                            }
+                            else
+                                cerr << "Error (socket read_some): " << err.message() << endl;
+                        });
+                    }
+                    else
+                        cerr << "Error (socket send): " << ec.message() << endl;
+                });
+                return;
+            }
+            else{
+                cerr << "Error (socket connect_handler):" << ec.message() << endl;
+            }
+        }
+        void do_connect(const int index, tcp::endpoint endpoint, const boost::system::error_code &ec, tcp::resolver::iterator it){
+            if(!ec){
+                tcp_socket[index] = new tcp::socket(ioservice);
+                tcp::endpoint dst_endpoint = *it;
+                (*tcp_socket[index]).async_connect(endpoint,  boost::bind( &server::connect_handler, this,index,dst_endpoint,std::placeholders::_1,it));
+            }
+            else{
+                cerr << "connect error:" << ec.message() << endl;
             }
         }
 
@@ -263,9 +338,11 @@ class server{
         tcp::resolver::iterator it)
         {
             if (!ec){
+                tcp::resolver::query q{client_record[index].host, client_record[index].port};
+                tcp::endpoint endpoint = *it;
+                resolv.async_resolve(q, boost::bind( &server::do_connect, this,index,endpoint,std::placeholders::_1,std::placeholders::_2));
                 //cerr <<"resolve_handeler"<<endl;
-                tcp_socket[index] = new tcp::socket(ioservice);
-                (*tcp_socket[index]).async_connect(*it,  boost::bind( &server::connect_handler, this,index,std::placeholders::_1));
+                
             }
             else{
                 cerr << "error:" <<ec <<endl;
@@ -288,4 +365,6 @@ int main()
     Printpanel();
     server s;
     ioservice.run();
+
+    return 0;
 }

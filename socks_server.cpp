@@ -136,7 +136,7 @@ private:
                 });
             }
             else{
-                cerr << "read client data error:" << ec.message() << endl;
+                //cerr << "read client data error:" << ec.message() << endl;
             }
         });
   }
@@ -268,16 +268,16 @@ private:
       cout << "<D_IP>: " << ip[0] << "." << ip[1] << "." << ip[2] << "." << ip[3] << endl;
       cout << "<D_PORT>: " << port << endl;
       if(CD == 1){
-        cout << "<Command Connect>" << endl;
+        cout << "<Command>: Connect" << endl;
       }
       else if(CD == 2){
-        cout << "<Command BIND>" << endl;
+        cout << "<Command>: BIND" << endl;
       }
       if(check == true){
-        cout << "<Reply> Accept" << endl;
+        cout << "<Reply>: Accept" << endl;
       }
       else{
-        cout << "<Reply> Reject" << endl;
+        cout << "<Reply>: Reject" << endl;
       }
       return;
   }
