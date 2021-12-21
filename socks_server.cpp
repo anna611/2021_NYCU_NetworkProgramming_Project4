@@ -91,7 +91,7 @@ private:
             //do_write(length);
           }
           else{
-            cerr << ec << endl;
+            //cerr << ec << endl;
           }
         });
   }
@@ -127,18 +127,16 @@ private:
                           readHost();
                       }
                       else{
-                          cerr << "bind send error:" << err2.message() <<endl;
+                          //cerr << "bind send error:" << err2.message() <<endl;
                       }
                   });
               }
               else{
-                  cerr << "bind accept error:" << err.message() <<endl;
+                  //cerr << "bind accept error:" << err.message() <<endl;
               }
 
           });
       }
-      else
-          cerr << "bind send error:" << ec.message() <<endl;
       });
   }
 
@@ -151,7 +149,7 @@ private:
               readClient();
           }
           else{
-            cerr << "send error:"<< ec.message() << endl;
+            //cerr << "send error:"<< ec.message() << endl;
           }
       });
   }
@@ -164,7 +162,7 @@ private:
               readHost();
           }
           else{
-            cerr << "send error:"<< ec.message() << endl;
+            //cerr << "send error:"<< ec.message() << endl;
           }
       });
   }
@@ -184,7 +182,7 @@ private:
 
                     }
                     else{
-                        cerr << "send error:"<< ec.message() << endl;
+                        //cerr << "send error:"<< ec.message() << endl;
                     }
                 });
                 connectsocket->shutdown(boost::asio::ip::tcp::socket::shutdown_send);
@@ -210,13 +208,13 @@ private:
 
                     }
                     else{
-                        cerr << "send error:"<< ec.message() << endl;
+                        //cerr << "send error:"<< ec.message() << endl;
                     }
                 });
                 socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_send);
             }
             else{
-                cerr << "read host data error"<< ec.message() << endl;
+                //cerr << "read host data error"<< ec.message() << endl;
             }
         });
   }
@@ -240,8 +238,6 @@ private:
               readClient();
               readHost();
           }
-          else
-              cout<<"send error!"<<endl;
           });
       }
   }
@@ -256,7 +252,7 @@ private:
           //cerr <<"after connect"<<endl;
       }
       else{
-          cerr << "error:" <<ec.message() <<endl;
+          //cerr << "error:" <<ec.message() <<endl;
       }
   }
   void connectOperation(int ip[],int port){
@@ -284,15 +280,15 @@ private:
       size_t pos = 0;
       string token;
       bool permit = true;
-      stringstream ss;
       //check socks.conf contains rules
       if(file_.is_open()) {
-        while(file_ >> grant >> mode >> iprule) {
-            //cerr << 
+        while(!file_.eof()) {
+            file_ >> grant >> mode >> iprule ;
             for(int i = 0;i < 4; ++ i){
+              stringstream ss;
               if((pos =iprule.find(deli)) != std::string::npos){
                   token = iprule.substr(0, pos);
-                  ss << token;
+                  ss.str(token);
                   ss >> addr[i];
                   iprule.erase(0, pos + deli.length());
               }
@@ -303,18 +299,18 @@ private:
             }
             if((CD == 1 && mode == "c") || (CD == 2 && mode == "b")){
                 for(int i = 0;i < 4;i++){
-                  //cerr << "firewall addr:" << addr[i] << endl;
-                  //cerr << "ip addr:" << ip[i] << endl;
                   if(addr[i] != 0 && addr[i] != ip[i]){
                       permit = false;
+                      break;
                   }
                 }
             }
+
         } 
       }
       else {
         permit = true;
-        cerr << "File open error" << endl;
+        //cerr << "File open error" << endl;
       }
       file_.close();
       return permit;
@@ -351,67 +347,9 @@ private:
           if(!ec){
 
           }
-          else
-              cout<<"send error!"<<endl;
       });
       return;
   }
-  /*void do_write(std::size_t length)
-  {
-    auto self(shared_from_this());
-    //strcpy(data_ ,"HTTP/1.1 200 OK\n");
-    boost::asio::async_write(socket_, boost::asio::buffer(data_, strlen(data_)),
-        [this, self](boost::system::error_code ec, std::size_t )
-        {
-          if (!ec)
-          {
-            strcpy(SERVER_ADDR,
-                   socket_.local_endpoint().address().to_string().c_str());
-            sprintf(SERVER_PORT, "%u", socket_.local_endpoint().port());
-            strcpy(REMOTE_ADDR,
-                   socket_.remote_endpoint().address().to_string().c_str());
-            sprintf(REMOTE_PORT, "%u", socket_.remote_endpoint().port());
-            int index_q = 0;
-            int index_e = 2;
-            int checkquery = 0;
-            memset(QUERY_STRING, 0, 1000);
-            for(int i = 0;i < (int)strlen(REQUEST_URI);i++){
-                if(REQUEST_URI[i] == '?'){
-                    checkquery = 1;
-                    i++;
-                }
-                if(REQUEST_URI[i] == '\0'){
-                    break;
-                }
-                if(checkquery == 1){
-                  QUERY_STRING[index_q] = REQUEST_URI[i];
-                  index_q++;
-                }
-                else{
-                    EXEC_FILE[index_e] = REQUEST_URI[i];
-                    index_e++;
-                }
-            }
-            //cerr <<"execfile:" <<EXEC_FILE << endl;
-            setclientenv();
-            io_context.notify_fork(io_service::fork_prepare);
-            if (fork() > 0) {
-              io_context.notify_fork(io_service::fork_parent);
-              socket_.close();
-            } else {
-              io_context.notify_fork(io_service::fork_child);
-              int sock = socket_.native_handle();
-              //dup2(sock, STDERR_FILENO);
-              dup2(sock, STDIN_FILENO);
-              dup2(sock, STDOUT_FILENO);
-              socket_.close();
-              execlp(EXEC_FILE, EXEC_FILE, NULL);
-               
-            }
-            do_read();
-          }
-        });
-  }*/
   
 };
 
@@ -467,7 +405,7 @@ int main(int argc, char* argv[])
   }
   catch (std::exception& e)
   {
-    std::cerr << "Exception: " << e.what() << "\n";
+    //std::cerr << "Exception: " << e.what() << "\n";
   }
 
   return 0;
