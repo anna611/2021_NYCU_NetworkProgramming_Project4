@@ -37,7 +37,7 @@ public:
   char clientdata[200] ;
   char hostdata[200] ;
   session(tcp::socket socket)
-    : socket_(std::move(socket)),resolv(io_context)
+    : socket_(std::move(socket)),resolv(io_context),bindAcceptor(io_context)
   {
     memset(clientdata,0,200);
     memset(hostdata,0,200);
@@ -51,6 +51,8 @@ public:
 private:
   tcp::resolver resolv;
   tcp::socket *connectsocket;
+  tcp::acceptor bindAcceptor;
+  unsigned char bindreply[8] = {0};
   void do_read()
   {
     auto self(shared_from_this());
@@ -76,11 +78,15 @@ private:
             }
             showMessage(CD,ip,port,check);
             if(check == true){
-                connectOperation(ip,port);
+                if(CD == 1)
+                    connectOperation(ip,port);
+                else if(CD == 2)
+                    bindOperation();
             }
             else{
                 rejectMessage(message);
-                do_read();
+                socket_.close();
+                exit(0);
             }
             //do_write(length);
           }
@@ -89,6 +95,53 @@ private:
           }
         });
   }
+  void bindOperation(){
+      auto self(shared_from_this());
+      unsigned short bindPort;
+      connectsocket = new tcp::socket(io_context);
+      tcp::endpoint endPoint(tcp::v4(),0);
+      bindAcceptor.open(endPoint.protocol());
+      bindAcceptor.set_option(tcp::acceptor::reuse_address(true));
+      bindAcceptor.bind(endPoint);
+      bindAcceptor.listen();
+      bindPort = bindAcceptor.local_endpoint().port();
+      bindreply[0] = 0;
+      bindreply[1] = 90;
+      bindreply[2] = (unsigned char)(bindPort/256);
+      bindreply[3] = (unsigned char)(bindPort%256);
+      for(int i = 4; i < 8;i++){
+          bindreply[i] = 0;
+      }
+      socket_.async_send(boost::asio::buffer(bindreply, 8),
+      [this,self](boost::system::error_code ec, std::size_t len){
+      if(!ec){
+          //cerr << "bind send call back" <<endl;
+          auto self(shared_from_this());
+          bindAcceptor.async_accept((*connectsocket),
+          [this,self](boost::system::error_code err){
+              if(!err){
+                socket_.async_send(boost::asio::buffer(bindreply, 8),
+                  [this,self](boost::system::error_code err2, std::size_t len){
+                      if(!err2){
+                          readClient();
+                          readHost();
+                      }
+                      else{
+                          cerr << "bind send error:" << err2.message() <<endl;
+                      }
+                  });
+              }
+              else{
+                  cerr << "bind accept error:" << err.message() <<endl;
+              }
+
+          });
+      }
+      else
+          cerr << "bind send error:" << ec.message() <<endl;
+      });
+  }
+
   void writeHost(std::size_t length){
       auto self(shared_from_this());
       (*connectsocket).async_send(boost::asio::buffer(clientdata, length),
@@ -134,6 +187,7 @@ private:
                         cerr << "send error:"<< ec.message() << endl;
                     }
                 });
+                connectsocket->shutdown(boost::asio::ip::tcp::socket::shutdown_send);
             }
             else{
                 //cerr << "read client data error:" << ec.message() << endl;
@@ -159,6 +213,7 @@ private:
                         cerr << "send error:"<< ec.message() << endl;
                     }
                 });
+                socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_send);
             }
             else{
                 cerr << "read host data error"<< ec.message() << endl;
@@ -233,6 +288,7 @@ private:
       //check socks.conf contains rules
       if(file_.is_open()) {
         while(file_ >> grant >> mode >> iprule) {
+            //cerr << 
             for(int i = 0;i < 4; ++ i){
               if((pos =iprule.find(deli)) != std::string::npos){
                   token = iprule.substr(0, pos);
@@ -247,9 +303,10 @@ private:
             }
             if((CD == 1 && mode == "c") || (CD == 2 && mode == "b")){
                 for(int i = 0;i < 4;i++){
+                  //cerr << "firewall addr:" << addr[i] << endl;
+                  //cerr << "ip addr:" << ip[i] << endl;
                   if(addr[i] != 0 && addr[i] != ip[i]){
                       permit = false;
-                      break;
                   }
                 }
             }
@@ -268,7 +325,7 @@ private:
       cout << "<D_IP>: " << ip[0] << "." << ip[1] << "." << ip[2] << "." << ip[3] << endl;
       cout << "<D_PORT>: " << port << endl;
       if(CD == 1){
-        cout << "<Command>: Connect" << endl;
+        cout << "<Command>: CONNECT" << endl;
       }
       else if(CD == 2){
         cout << "<Command>: BIND" << endl;
