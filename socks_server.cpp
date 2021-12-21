@@ -68,18 +68,34 @@ private:
             int ip[4] = {0};
             int port;
             bool check = false;
+            bool socks4a = false;
+            string domainname = "";
+            string sock4aip = "";
             port = (int)message[2]*256+(int)message[3];
             for(int i = 0; i < 4;++i)
               ip[i] = (int)message[i+4];
+            socks4a = checksocks4a(ip);
+            if(socks4a == true){
+                for(int i = 8;i < (int)sizeof(message);++i){
+                  if(message[i] != 0){
+                    domainname += message[i];
+                  }
+                }
+              tcp::resolver::query q{domainname, to_string(port)};
+              tcp::resolver::results_type results= resolv.resolve(q);
+              tcp::endpoint endPoint = *results;
+              boost::asio::ip::address tempsocks4a = endPoint.address();
+              sock4aip = tempsocks4a.to_string();
+            }
             check = checkfirewall(CD,ip);
             if(VN != 4){
               cerr << "Not socks4 request" << endl;
               check = false;
             }
-            showMessage(CD,ip,port,check);
+            showMessage(CD,ip,port,check,sock4aip);
             if(check == true){
                 if(CD == 1)
-                    connectOperation(ip,port);
+                    connectOperation(ip,port,domainname);
                 else if(CD == 2)
                     bindOperation();
             }
@@ -94,6 +110,15 @@ private:
             //cerr << ec << endl;
           }
         });
+  }
+  bool checksocks4a(int ip[]){
+      if((ip[0] == 0 ) && (ip[1] == 0 )&&(ip[2] == 0 )&&(ip[3] == 1 ))
+      {
+        return true;
+      }
+      else{
+        return false;
+      }
   }
   void bindOperation(){
       auto self(shared_from_this());
@@ -255,14 +280,19 @@ private:
           //cerr << "error:" <<ec.message() <<endl;
       }
   }
-  void connectOperation(int ip[],int port){
+  void connectOperation(int ip[],int port,string domainname){
       auto self(shared_from_this());
       //cerr << "connectOperation" <<endl;
       string host = "";
-      for(int i = 0;i < 4;++i){
-          host += to_string(ip[i]);
-          if(i != 3)
-            host += ".";
+      if(domainname != ""){
+        host = domainname;
+      }
+      else{
+        for(int i = 0;i < 4;++i){
+            host += to_string(ip[i]);
+            if(i != 3)
+              host += ".";
+        }
       }
       //cerr << "host:" << host << endl;
       //cerr << "port:" << port << endl;
@@ -315,10 +345,15 @@ private:
       file_.close();
       return permit;
   }
-  void showMessage(unsigned char CD,int ip[],int port,bool check){
+  void showMessage(unsigned char CD,int ip[],int port,bool check,string sock4aip){
       cout << "<S_IP>: " << socket_.remote_endpoint().address() << endl;
       cout << "<S_PORT>: " << socket_.remote_endpoint().port() << endl;
-      cout << "<D_IP>: " << ip[0] << "." << ip[1] << "." << ip[2] << "." << ip[3] << endl;
+      if(sock4aip != ""){
+          cout << "<D_IP>: " << sock4aip << endl;
+      }
+      else{
+          cout << "<D_IP>: " << ip[0] << "." << ip[1] << "." << ip[2] << "." << ip[3] << endl;
+      }
       cout << "<D_PORT>: " << port << endl;
       if(CD == 1){
         cout << "<Command>: CONNECT" << endl;
