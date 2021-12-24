@@ -34,13 +34,13 @@ public:
   tcp::socket socket_;
   enum { max_length = 1024 };
   unsigned char message[max_length] = {0};
-  char clientdata[200] ;
-  char hostdata[200] ;
+  char clientdata[max_length] ;
+  char hostdata[max_length] ;
   session(tcp::socket socket)
     : socket_(std::move(socket)),resolv(io_context),bindAcceptor(io_context)
   {
-    memset(clientdata,0,200);
-    memset(hostdata,0,200);
+    memset(clientdata,0,max_length);
+    memset(hostdata,0,max_length);
   }
 
   void start()
@@ -112,7 +112,7 @@ private:
         });
   }
   bool checksocks4a(int ip[]){
-      if((ip[0] == 0 ) && (ip[1] == 0 )&&(ip[2] == 0 )&&(ip[3] == 1 ))
+      if((ip[0] == 0 ) && (ip[1] == 0 )&&(ip[2] == 0 ))
       {
         return true;
       }
@@ -167,10 +167,11 @@ private:
 
   void writeHost(std::size_t length){
       auto self(shared_from_this());
-      (*connectsocket).async_send(boost::asio::buffer(clientdata, length),
+      async_write((*connectsocket),boost::asio::buffer(clientdata, length),
       [this,self](boost::system::error_code ec, std::size_t len){
           if(!ec){
-              memset(clientdata,0,200);
+              memset(clientdata,0,max_length);
+              //usleep(5);
               readClient();
           }
           else{
@@ -180,10 +181,11 @@ private:
   }
   void writeClient(std::size_t length){
       auto self(shared_from_this());
-      socket_.async_send(boost::asio::buffer(hostdata, length),
+      async_write(socket_,boost::asio::buffer(hostdata, length),
       [this,self](boost::system::error_code ec, std::size_t len){
           if(!ec){
-              memset(hostdata,0,200);
+              memset(hostdata,0,max_length);
+              //usleep(5);
               readHost();
           }
           else{
@@ -193,7 +195,7 @@ private:
   }
   void readClient(){
       auto self(shared_from_this());
-      socket_.async_read_some(boost::asio::buffer(clientdata, 200),
+      socket_.async_read_some(boost::asio::buffer(clientdata, max_length),
         [this, self](boost::system::error_code ec, std::size_t length)
         {
             if(!ec){
@@ -219,7 +221,7 @@ private:
   }
   void readHost(){
       auto self(shared_from_this());
-      (*connectsocket).async_read_some(boost::asio::buffer(hostdata, 200),
+      (*connectsocket).async_read_some(boost::asio::buffer(hostdata, max_length),
         [this, self](boost::system::error_code ec, std::size_t length)
         {
             if(!ec){
@@ -309,11 +311,13 @@ private:
       string deli = ".";
       size_t pos = 0;
       string token;
-      bool permit = true;
+      int checkcount = 0;
+      bool permit = false;
       //check socks.conf contains rules
       if(file_.is_open()) {
         while(!file_.eof()) {
             file_ >> grant >> mode >> iprule ;
+            checkcount = 0;
             for(int i = 0;i < 4; ++ i){
               stringstream ss;
               if((pos =iprule.find(deli)) != std::string::npos){
@@ -329,17 +333,17 @@ private:
             }
             if((CD == 1 && mode == "c") || (CD == 2 && mode == "b")){
                 for(int i = 0;i < 4;i++){
-                  if(addr[i] != 0 && addr[i] != ip[i]){
-                      permit = false;
-                      break;
+                  if(addr[i] == 0 || addr[i] == ip[i]){
+                      checkcount ++;
                   }
                 }
+                if(checkcount == 4)
+                  permit = true;
             }
 
         } 
       }
       else {
-        permit = true;
         //cerr << "File open error" << endl;
       }
       file_.close();
